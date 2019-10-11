@@ -5,6 +5,7 @@
 ; http;//rainwarrior.ca
 ;
 
+USE_DPCM = 0
 COL1 = 5
 COL2 = 3
 COL3 = 3
@@ -355,7 +356,7 @@ render:
 	lda #$00
 	sta $2006
 	jsr nmt_apply
-	jsr render_wait0 ; delay until line 48
+	jsr render_wait0
 	lda pal
 	bne :+
 		jsr oamdma
@@ -373,13 +374,66 @@ render:
 	SCROLL_SPLIT 8,48,0
 	; unblank
 	lda #%00011110
-	sta $2001
+	sta $2001 ; line 47 hblank > dot 257
 	.assert ROWST=12, error, "render timing needs adjustment"
-	jsr render_wait1 ; wait 96 lines
-	SCROLL_SPLIT 8,0,0
+	jsr render_wait1
+	SCROLL_SPLIT 8,0,0  ; line 95 hblank > dot 257
 	rts
 
-render_wait0: ; get $2001 write in hblank > dot 257 of line 47
+.if USE_DPCM ; DPCM sample fetch adds cycles, delays must be adjusted
+
+render_wait0:
+	lda pal
+	bne @pal
+@ntsc:
+	jsr delay_1536
+	jsr delay_192
+	jsr delay_48
+	jsr delay_24
+	jsr delay_12
+	nop
+	nop
+	nop
+	nop
+	rts
+@pal:
+	jsr delay_6144
+	jsr delay_384
+	jsr delay_48
+	jsr delay_24
+	nop
+	nop
+	rts
+
+render_wait1:
+	lda pal
+	bne @pal
+@ntsc:
+	jsr delay_3072
+	jsr delay_1536
+	jsr delay_384
+	jsr delay_192
+	jsr delay_96
+	jsr delay_48
+	jsr delay_24
+	jsr delay_12
+	nop
+	nop
+	nop
+	rts
+@pal:
+	jsr delay_3072
+	jsr delay_1536
+	jsr delay_384
+	jsr delay_24
+	nop
+	nop
+	nop
+	rts
+
+.else
+
+render_wait0:
 	lda pal
 	bne @pal
 @ntsc:
@@ -423,6 +477,8 @@ render_wait1:
 	nop
 	nop
 	rts
+
+.endif
 
 oamdma:
 	lda #0
@@ -644,6 +700,15 @@ main:
 	; turn on NMI
 	lda #%10000000
 	sta $2000
+	; HACK test of DPCM
+	.if USE_DPCM
+		lda #$4F
+		sta $4010
+		lda #$FF
+		sta $4013
+		lda #$10
+		sta $4015
+	.endif
 	; infinite loop
 :
 	jmp :-
