@@ -132,7 +132,8 @@ chr0 += sliders(base.crop((72, 0,80, 8))) # 8x8
 chr0 += [0] * (4096-len(chr0)) # padding to 4k
 
 chr1 = []
-chr1 += tallsprites(base.crop((0,80,64,96)))
+#chr1 += tallsprites(base.crop((0,80,64,96)))
+chr1 += tallsprites(PIL.Image.new("P",(64,16),color=0)) # blank text to hide when mouth closed
 chr1 += sliders(base.crop(( 0,32,32,64)))
 chr1 += sliders(base.crop((32,24,56,48)))
 chr1 += sliders(base.crop((56,16,72,32)))

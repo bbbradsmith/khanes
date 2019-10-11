@@ -5,7 +5,7 @@
 ; http;//rainwarrior.ca
 ;
 
-USE_DPCM = 0
+USE_DPCM = 1
 COL1 = 5
 COL2 = 3
 COL3 = 3
@@ -42,6 +42,28 @@ oam: .res 256
 ; Data
 ; ====
 
+.segment "CHR"
+.incbin "khan.chr"
+
+.segment "DPCM"
+
+; creates a DPCM address constant with the same name as label_ but with "_dpcm" appended
+.macro DPCM_ADDR label_
+	.local label_dpcm
+	label_dpcm = (((label_)-$C000)>>6)
+	.ident(.concat(.string(label_),"_dpcm")) = <label_dpcm
+	.assert .ident(.concat(.string(label_),"_dpcm")) = label_dpcm, error, "DPCM not in range"
+.endmacro
+
+.align 64
+scream: .incbin "khan.dmc"
+DPCM_ADDR scream
+
+.align 64
+silent: .byte 0
+DPCM_ADDR silent
+
+
 .segment "RODATA"
 
 palette:
@@ -49,10 +71,10 @@ palette:
 .byte $0F, $0F, $05, $00
 .byte $0F, $05, $16, $10
 .byte $0F, $06, $26, $30
+.byte $0F, $0F, $0F, $0F
 .byte $0F, $01, $11, $21
 .byte $0F, $02, $12, $22
 .byte $0F, $03, $13, $23
-.byte $0F, $04, $14, $24
 
 attribute_row: ; same row used for all visible rows
 .byte %01000100, %10101010, %10101010, %11101110, $FF, $FF, $FF, $FF
@@ -125,11 +147,11 @@ baset:
 .endrepeat
 .assert (*-baset)=32, error, "baset size"
 
-; modulo of each tile column
+; modulo of each tile column, baked into tables
 
 ;modt1:
 ;.repeat 8, I
-;	.byte BASE1 + ((I-8) .MOD  8)
+;	.byte BASE1 + ((I+(8-8)) .MOD  8)
 ;.endrepeat
 
 modt2:
@@ -347,8 +369,8 @@ render:
 	lda #%00000000
 	sta $2001
 	lda pal
-	beq :+ ; PAL should OAMDMA at start
-		jsr oamdma
+	beq :+
+		jsr oam_dma ; PAL should OAM DMA at start of NMI blank
 	:
 	bit $2002
 	lda #$20
@@ -359,7 +381,7 @@ render:
 	jsr render_wait0
 	lda pal
 	bne :+
-		jsr oamdma
+		jsr oam_dma ; NTSC should OAM DMA at end of forced blank
 	:
 	; set CHR page and other $2000 properties
 	lda mouth
@@ -373,14 +395,16 @@ render:
 	sta $2000
 	SCROLL_SPLIT 8,48,0
 	; unblank
-	lda #%00011110
+	lda #%00011010
 	sta $2001 ; line 47 hblank > dot 257
 	.assert ROWST=12, error, "render timing needs adjustment"
 	jsr render_wait1
 	SCROLL_SPLIT 8,0,0  ; line 95 hblank > dot 257
 	rts
 
-.if USE_DPCM ; DPCM sample fetch adds cycles, delays must be adjusted
+.if USE_DPCM
+; DPCM sample fetch adds cycles, delays must be adjusted
+; These are tuned specifically for sample rate $E
 
 render_wait0:
 	lda pal
@@ -389,20 +413,14 @@ render_wait0:
 	jsr delay_1536
 	jsr delay_192
 	jsr delay_48
-	jsr delay_24
+	jsr delay_48
 	jsr delay_12
-	nop
-	nop
-	nop
-	nop
 	rts
 @pal:
 	jsr delay_6144
 	jsr delay_384
-	jsr delay_48
-	jsr delay_24
-	nop
-	nop
+	jsr delay_96
+	jsr delay_12
 	rts
 
 render_wait1:
@@ -411,21 +429,15 @@ render_wait1:
 @ntsc:
 	jsr delay_3072
 	jsr delay_1536
-	jsr delay_384
-	jsr delay_192
-	jsr delay_96
-	jsr delay_48
-	jsr delay_24
-	jsr delay_12
-	nop
-	nop
-	nop
+	jsr delay_768
 	rts
 @pal:
 	jsr delay_3072
 	jsr delay_1536
 	jsr delay_384
 	jsr delay_24
+	jsr delay_12
+	nop
 	nop
 	nop
 	nop
@@ -480,7 +492,7 @@ render_wait1:
 
 .endif
 
-oamdma:
+oam_dma:
 	lda #0
 	sta $2003
 	lda #>oam
@@ -697,14 +709,34 @@ main:
 	; fill render data for first frame
 	jsr animate
 	jsr nmt_rows
+	; place 8 black blocking sprites on line 192
+	ldx #0
+	:
+		lda #191
+		sta oam+0, X
+		lda #$30 ; a conveniently solid tile
+		sta oam+1, X
+		lda #$00
+		sta oam+2, X
+		sta oam+3, X
+		inx
+		inx
+		inx
+		inx
+		cpx #(8*4)
+		bcc :-
 	; turn on NMI
 	lda #%10000000
 	sta $2000
 	; HACK test of DPCM
 	.if USE_DPCM
-		lda #$4F
+		lda #$4E
 		sta $4010
-		lda #$FF
+		;lda #scream_dpcm
+		lda #silent_dpcm
+		sta $4012
+		;lda #$FF
+		lda #0
 		sta $4013
 		lda #$10
 		sta $4015
@@ -716,10 +748,6 @@ main:
 ; =======
 ; NES ROM
 ; =======
-
-.segment "CHR"
-
-.incbin "khan.chr"
 
 .segment "HEADER"
 
