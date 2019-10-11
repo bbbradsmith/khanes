@@ -103,6 +103,17 @@ def sliders(im):
     return chr
 
 #
+# decompose image into 8x16 chunks for tall sprites
+#
+
+def tallsprites(im):
+    chr = []
+    for x in range(0,im.width,8):
+        for y in range(0,im.height,16):
+            chr += make_chr(im.crop((x,y,x+8,y+16)))
+    return chr
+
+#
 # output filenames
 #
 
@@ -113,7 +124,7 @@ chrdeb = "temp\\khan.chr.png"
 base = index_image("khan.png",PALETTE)
 
 chr0 = []
-chr0 += make_chr(base.crop((0,64,64,80))) # text
+chr0 += tallsprites(base.crop((0,64,64,80))) # text
 chr0 += sliders(base.crop(( 0, 0,32,32))) # 32x32 head
 chr0 += sliders(base.crop((32, 0,56,24))) # 24x24
 chr0 += sliders(base.crop((56, 0,72,16))) # 16x16
@@ -121,10 +132,9 @@ chr0 += sliders(base.crop((72, 0,80, 8))) # 8x8
 chr0 += [0] * (4096-len(chr0)) # padding to 4k
 
 chr1 = []
-chr1 += make_chr(base.crop((0,80,64,96)))
+chr1 += tallsprites(base.crop((0,80,64,96)))
 chr1 += sliders(base.crop(( 0,32,32,64)))
 chr1 += sliders(base.crop((32,24,56,48)))
-
 chr1 += sliders(base.crop((56,16,72,32)))
 chr1 += sliders(base.crop((72, 8,80,16)))
 chr1 += [0] * (4096-len(chr1))
