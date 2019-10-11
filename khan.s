@@ -19,17 +19,17 @@ SPEED_MAX = 2*256
 ; ===
 
 .segment "ZEROPAGE"
-mouth: .res 1
-i:     .res 1
-j:     .res 1
-ptr:   .res 2
-pal:   .res 1 ; 0 = NTSC timing, 1 = PAL timing
+mouth:   .res 1
+i:       .res 1
+j:       .res 1
+ptr:     .res 2
+pal:     .res 1 ; 0 = NTSC timing, 1 = PAL timing
+nmi_now: .res 1 ; prevents reentry
 
 .segment "BSS"
 nmt:  .res (ROWST*32)
 rot0: .res 16
 rot1: .res 16
-rott: .res 32
 
 .assert (COLUMNS<16), error, "rot0/rot1 array size"
 
@@ -124,20 +124,43 @@ baset:
 
 ; modulo of each tile column
 
-modt:
-.repeat COL1
-	.byte 8
+;modt1:
+;.repeat 8, I
+;	.byte BASE1 + ((I-8) .MOD  8)
+;.endrepeat
+
+modt2:
+.repeat 16, I
+	.byte BASE2 + ((I+(16-8)) .MOD 16)
 .endrepeat
-.repeat COL2
-	.byte 16, 16
+.repeat 16, I
+	.byte BASE2 + 16 + ((I+(16-8)) .MOD 16)
 .endrepeat
-.repeat COL3
-	.byte 24, 24, 24
+
+modt3:
+.repeat 24, I
+	.byte BASE3 + ((I+(24-8)) .MOD 24)
 .endrepeat
-.repeat COL4
-	.byte 32, 32, 32, 32
+.repeat 24, I
+	.byte BASE3 + 24 + ((I+(24-8)) .MOD 24)
 .endrepeat
-.assert (*-modt)=32, error, "modt size"
+.repeat 24, I
+	.byte BASE3 + 48 + ((I+(24-8)) .MOD 24)
+.endrepeat
+
+modt4:
+.repeat 32, I
+	.byte BASE4 + ((I+(32-8)) .MOD 32)
+.endrepeat
+.repeat 32, I
+	.byte BASE4 + 32 + ((I+(32-8)) .MOD 32)
+.endrepeat
+.repeat 32, I
+	.byte BASE4 + 64 + ((I+(32-8)) .MOD 32)
+.endrepeat
+.repeat 32, I
+	.byte BASE4 + 96 + ((I+(32-8)) .MOD 32)
+.endrepeat
 
 ; =========
 ; Utilities
@@ -164,12 +187,16 @@ animate:
 			sbc mod, X
 		:
 		sta rot1, X
-		; copy rot to rott
+		; copy rot to first row of nmt
 		ldy width, X
 		:
 			sty i
 			ldy j ; tile index
-			sta rott, Y
+			clc
+			adc baset, Y
+			sta nmt, Y
+			sec
+			sbc baset, Y
 			iny
 			sty j
 			ldy i
@@ -180,45 +207,97 @@ animate:
 		bcc @loop
 	rts
 
-nmt_row:
-	; ptr = nmt row
-	ldy #0
-	@loop:
-		; generate tile
-		lda rott, Y
-		clc
-		adc baset, Y
-		sta (ptr), Y
-		; advance by 8 pixels backward (modulo)
-		lda rott, Y
-		sec
-		sbc #8
-		bcs :+
-			;clc
-			adc modt, Y
-		:
-		sta rott, Y
-		iny
-		cpy #32
-		bcc @loop
-	; advance row
-	lda ptr+0
+.macro NMT_ROW1 nmt_, index_
+	lda nmt_+index_, Y
+	sta nmt_+index_+32, Y
+.endmacro
+
+.macro NMT_ROW2 nmt_, index_
+	ldx nmt_+index_, Y
+	lda modt2-BASE2, X
+	sta nmt_+index_+32, Y
+	ldx nmt_+index_+1, Y
+	lda modt2-BASE2, X
+	sta nmt_+index_+33, Y
+.endmacro
+
+.macro NMT_ROW3 nmt_, index_
+	ldx nmt_+index_, Y
+	lda modt3-BASE3, X
+	sta nmt_+index_+32, Y
+	ldx nmt_+index_+1, Y
+	lda modt3-BASE3, X
+	sta nmt_+index_+33, Y
+	ldx nmt_+index_+2, Y
+	lda modt3-BASE3, X
+	sta nmt_+index_+34, Y
+.endmacro
+
+.macro NMT_ROW4 nmt_, index_
+	ldx nmt_+index_, Y
+	lda modt4-BASE4, X
+	sta nmt_+index_+32, Y
+	ldx nmt_+index_+1, Y
+	lda modt4-BASE4, X
+	sta nmt_+index_+33, Y
+	ldx nmt_+index_+2, Y
+	lda modt4-BASE4, X
+	sta nmt_+index_+34, Y
+	ldx nmt_+index_+3, Y
+	lda modt4-BASE4, X
+	sta nmt_+index_+35, Y
+.endmacro
+
+nmt_row0:
+	; Y = first tile
+	.repeat COL1, I
+		NMT_ROW1 nmt, I
+	.endrepeat
+	.repeat COL2, I
+		NMT_ROW2 nmt, (COL1+(2*I))
+	.endrepeat
+	.repeat COL3, I
+		NMT_ROW3 nmt, (COL1+(2*COL2)+(3*I))
+	.endrepeat
+	.repeat COL4, I
+		NMT_ROW4 nmt, (COL1+(2*COL2)+(3*COL3)+(4*I))
+	.endrepeat
+	tya
 	clc
 	adc #32
-	sta ptr+0
-	bcc :+
-		inc ptr+1
-	:
+	tay
+	rts
+
+nmt_row1:
+	; Y = first tile
+	.repeat COL1, I
+		NMT_ROW1 nmt+256, I
+	.endrepeat
+	.repeat COL2, I
+		NMT_ROW2 nmt+256, (COL1+(2*I))
+	.endrepeat
+	.repeat COL3, I
+		NMT_ROW3 nmt+256, (COL1+(2*COL2)+(3*I))
+	.endrepeat
+	.repeat COL4, I
+		NMT_ROW4 nmt+256, (COL1+(2*COL2)+(3*COL3)+(4*I))
+	.endrepeat
+	tya
+	clc
+	adc #32
+	tay
 	rts
 
 nmt_rows:
-	lda #<nmt
-	sta ptr+0
-	lda #>nmt
-	sta ptr+1
-	.repeat ROWST
-		jsr nmt_row
+	ldy #0
+	.repeat (256/32)
+		jsr nmt_row0
 	.endrepeat
+	.assert (ROWST*32)>256, error, "ROWST size too large"
+	.repeat ROWST-(1+(256/32))
+		jsr nmt_row1
+	.endrepeat
+	.assert (ROWST*32)<512, error, "ROWST size too lage"
 	rts
 
 .segment "ALIGN"
@@ -227,28 +306,18 @@ nmt_rows:
 ; aligned for fixed timing
 .align 256
 nmt_apply:
-	UNROLL = 16
+	; would normally unroll this, but the 48 line forced blank is pretty generous
 	ldx #0
 	:
-		.repeat UNROLL, I
-			lda nmt+I, X
-			sta $2007
-		.endrepeat
-		txa
-		clc
-		adc #UNROLL
-		tax
+		lda nmt, X
+		sta $2007
+		inx
 		bne :-
 	.assert (ROWST*32)>256, error, "ROWST size too large"
 	:
-		.repeat UNROLL, I
-			lda nmt+256+I, X
-			sta $2007
-		.endrepeat
-		txa
-		clc
-		adc #UNROLL
-		tax
+		lda nmt+256, X
+		sta $2007
+		inx
 		cpx #((ROWST*32)-256)
 		bcc :-
 	.assert (ROWST*32)<512, error, "ROWST size too lage"
@@ -272,7 +341,7 @@ render:
 	lda #$00
 	sta $2006
 	jsr nmt_apply
-	jsr delay0 ; delay until line 48
+	jsr render_wait0 ; delay until line 48
 	lda pal
 	bne :+
 		jsr oamdma
@@ -298,34 +367,53 @@ render:
 	lda #%00011110
 	sta $2001
 	.assert ROWST=12, error, "render timing needs adjustment"
-	jsr delay1 ; wait 96 lines
-	; TODO reset scroll 8,0
-	;lda #0
-	;ldx #1
-	;sta $2006
-	;sta $2005
-	;sta $2005
-	;stx $2006
-	jsr delay2 ; wait 48 lines
-	; TODO blank the bottom for symmetry
-	;lda #%00000000
-	;sta $2001
+	jsr render_wait1 ; wait 96 lines
+	; reset scroll 8,0
+	lda #0
+	ldx #1
+	sta $2006
+	sta $2005
+	sta $2005
+	stx $2006
+	jsr render_wait2 ; wait 48 lines
+	; blank the bottom for symmetry
+	lda #%00000000
+	sta $2001
 	rts
-delay0:
+
+render_wait0: ; get $2001 write in hblank > dot 257 of line 47
 	lda pal
 	bne @pal
 @ntsc:
+	jsr delay_1536
+	jsr delay_192
+	jsr delay_96
+	jsr delay_48
+	jsr delay_24
 	rts
 @pal:
+	jsr delay_6144
+	jsr delay_384
+	jsr delay_192
+	jsr delay_12
+	nop
+	nop
 	rts
-delay1:
+render_wait1:
 	lda pal
 	bne @pal
 @ntsc:
+	jsr delay_6144
+	jsr delay_3072
+	jsr delay_1536
+	jsr delay_96
+	jsr delay_24
 	rts
 @pal:
+	jsr delay_6144 ; TODO
 	rts
-delay2:
+render_wait2:
+	jsr delay_192 ; TODO
 	lda pal
 	bne @pal
 @ntsc:
@@ -339,6 +427,20 @@ oamdma:
 	lda #>oam
 	sta $4014
 	rts
+
+; some compact cycle delay routines
+delay_24576: jsr delay_12288
+delay_12288: jsr delay_6144
+delay_6144:  jsr delay_3072
+delay_3072:  jsr delay_1536
+delay_1536:  jsr delay_768
+delay_768:   jsr delay_384
+delay_384:   jsr delay_192
+delay_192:   jsr delay_96
+delay_96:    jsr delay_48
+delay_48:    jsr delay_24
+delay_24:    jsr delay_12
+delay_12:    rts
 
 ; Detects NTSC vs PAL
 ; http://forums.nesdev.com/viewtopic.php?p=163258#p163258
@@ -384,10 +486,17 @@ nmi:
 	pha
 	tya
 	pha
-	jsr render
-	jsr animate
-	jsr nmt_rows
-	; DO sound
+	lda nmi_now
+	bne :+
+		lda #1
+		sta nmi_now
+		jsr render
+		jsr animate
+		jsr nmt_rows
+		; DO sound
+		lda #0
+		sta nmi_now
+	:
 	pla
 	tay
 	pla
