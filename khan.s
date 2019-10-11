@@ -53,7 +53,7 @@ palette:
 .byte $0F, $03, $13, $23
 .byte $0F, $04, $14, $24
 
-attribute_row: ; same row used for all rows
+attribute_row: ; same row used for all visible rows
 .byte %01000100, %11101110, $FF, $FF, $FF, $FF, $FF, $FF
 
 ; speed of each column
@@ -323,6 +323,18 @@ nmt_apply:
 	.assert (ROWST*32)<512, error, "ROWST size too lage"
 	rts
 
+; X/Y scroll split at a fixed x/y/nametable
+.macro SCROLL_SPLIT x_, y_, n_
+	lda #((y_ & %11000000) >> 6) | ((y_ & %00000011) << 4) | (n_ << 2)
+	sta $2006
+	lda #y_
+	sta $2005
+	lda #x_
+	sta $2005
+	lda #((x_ & %11111000) >> 3) | ((y_ & %00111000) << 2)
+	sta $2006
+.endmacro
+
 ; timed rendering code with forced black
 ; 16:9 letterboxing (48 lines of blank at top and bottom)
 ; aligned for fixed timing
@@ -356,29 +368,13 @@ render:
 	and #%00011000 ; mouth high bit selects both CHR pages
 	ora #%10100000 ; NMI on, high sprites, +1 increment, nametable 00
 	sta $2000
-	; set scroll 8,0
-	lda #0
-	ldx #1
-	sta $2006
-	sta $2005
-	sta $2005
-	stx $2006
+	SCROLL_SPLIT 8,48,0
 	; unblank
 	lda #%00011110
 	sta $2001
 	.assert ROWST=12, error, "render timing needs adjustment"
 	jsr render_wait1 ; wait 96 lines
-	; reset scroll 8,0
-	lda #0
-	ldx #1
-	sta $2006
-	sta $2005
-	sta $2005
-	stx $2006
-	jsr render_wait2 ; wait 48 lines
-	; blank the bottom for symmetry
-	lda #%00000000
-	sta $2001
+	SCROLL_SPLIT 8,0,0
 	rts
 
 render_wait0: ; get $2001 write in hblank > dot 257 of line 47
@@ -389,36 +385,41 @@ render_wait0: ; get $2001 write in hblank > dot 257 of line 47
 	jsr delay_192
 	jsr delay_96
 	jsr delay_48
-	jsr delay_24
+	nop
+	nop
+	nop
+	nop
+	nop
 	rts
 @pal:
 	jsr delay_6144
 	jsr delay_384
 	jsr delay_192
-	jsr delay_12
-	nop
 	nop
 	rts
+
 render_wait1:
 	lda pal
 	bne @pal
 @ntsc:
-	jsr delay_6144
 	jsr delay_3072
 	jsr delay_1536
-	jsr delay_96
+	jsr delay_768
 	jsr delay_24
+	jsr delay_12
+	nop
 	rts
 @pal:
-	jsr delay_6144 ; TODO
-	rts
-render_wait2:
-	jsr delay_192 ; TODO
-	lda pal
-	bne @pal
-@ntsc:
-	rts
-@pal:
+	jsr delay_3072
+	jsr delay_1536
+	jsr delay_384
+	jsr delay_48
+	jsr delay_24
+	nop
+	nop
+	nop
+	nop
+	nop
 	rts
 
 oamdma:
@@ -592,8 +593,22 @@ main:
 		lda #0 ; anything not PAL is assumed NTSC
 	:
 	sta pal
-	; load palettes
+	; wipe nametables
 	bit $2002
+	lda #$20
+	sta $2006
+	lda #$00
+	sta $2006
+	;lda #0
+	tax
+	ldy #16
+	:
+		sta $2007
+		inx
+		bne :-
+		dey
+		bne :-
+	; load palettes
 	lda #$3F
 	sta $2006
 	lda #$00
@@ -610,7 +625,7 @@ main:
 	sta $2006
 	lda #$C0
 	sta $2006
-	ldy #8
+	ldy #3
 	ldx #0
 	:
 		lda attribute_row, X
