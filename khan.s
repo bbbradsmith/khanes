@@ -12,7 +12,7 @@ COL4 = 3
 COLUMNS = COL1 + COL2 + COL3 + COL4 ; animated columns
 ROWST = 12 ; tile rows to update
 SPEED_MIN = 256/4
-SPEED_MAX = 2*256
+SPEED_MAX = 3*256
 
 ; ===
 ; RAM
@@ -45,8 +45,8 @@ oam: .res 256
 
 palette:
 .byte $0F, $0F, $0F, $0F
-.byte $0F, $0F, $06, $00
-.byte $0F, $06, $16, $10
+.byte $0F, $0F, $05, $00
+.byte $0F, $05, $16, $10
 .byte $0F, $06, $26, $30
 .byte $0F, $01, $11, $21
 .byte $0F, $02, $12, $22
@@ -54,18 +54,20 @@ palette:
 .byte $0F, $04, $14, $24
 
 attribute_row: ; same row used for all visible rows
-.byte %01000100, %11101110, $FF, $FF, $FF, $FF, $FF, $FF
+.byte %01000100, %10101010, %10101010, %11101110, $FF, $FF, $FF, $FF
 
 ; speed of each column
 
 speed0:
 .repeat COLUMNS, I
-	.byte <(SPEED_MIN+(((SPEED_MAX-SPEED_MIN)*I)/(COLUMNS-1)))
+	;.byte <(SPEED_MIN+(((SPEED_MAX-SPEED_MIN)*I)/(COLUMNS-1))) ; linear
+	.byte <(SPEED_MIN+(((SPEED_MAX-SPEED_MIN)*(I*I))/((COLUMNS-1)*(COLUMNS-1)))) ; quadratic
 .endrepeat
 
 speed1:
 .repeat COLUMNS, I
-	.byte >(SPEED_MIN+(((SPEED_MAX-SPEED_MIN)*I)/(COLUMNS-1)))
+	;.byte >(SPEED_MIN+(((SPEED_MAX-SPEED_MIN)*I)/(COLUMNS-1)))
+	.byte >(SPEED_MIN+(((SPEED_MAX-SPEED_MIN)*(I*I))/((COLUMNS-1)*(COLUMNS-1))))
 .endrepeat
 
 ; width of each column
