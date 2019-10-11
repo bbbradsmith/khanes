@@ -20,12 +20,15 @@ SPEED_MAX = 3*256
 ; ===
 
 .segment "ZEROPAGE"
-mouth:   .res 1
-i:       .res 1
+i:       .res 1 ; temporary
 j:       .res 1
-ptr:     .res 2
 pal:     .res 1 ; 0 = NTSC timing, 1 = PAL timing
-nmi_now: .res 1 ; prevents reentry
+nmi_now: .res 1 ; prevents NMI reentry
+mouth:   .res 1 ; count down to sample stop / mouth close
+textax:  .res 2 ; text "angle" for curve
+textay:  .res 2
+textspr: .res 1 ; text sprite animation
+chrsel:  .res 1 ; selects CHR pages for rendering
 
 .segment "BSS"
 nmt:  .res (ROWST*32)
@@ -43,28 +46,42 @@ oam: .res 256
 ; ====
 
 .segment "CHR"
+
 .incbin "khan.chr"
+
 
 .segment "DPCM"
 
-; creates a DPCM address constant with the same name as label_ but with "_dpcm" appended
-.macro DPCM_ADDR label_
+; Place immediately after a labelled 64-byte aligned DPCM sample.
+; Creates xxx_dpcm_addr constant for $4012
+; Creates xxx_dpcm_len constant for $4013
+.macro DPCM_SAMPLE label_
 	.local label_dpcm
 	label_dpcm = (((label_)-$C000)>>6)
-	.ident(.concat(.string(label_),"_dpcm")) = <label_dpcm
-	.assert .ident(.concat(.string(label_),"_dpcm")) = label_dpcm, error, "DPCM not in range"
+	.ident(.concat(.string(label_),"_dpcm_addr")) = <label_dpcm
+	.assert .ident(.concat(.string(label_),"_dpcm_addr")) = label_dpcm, error, "DPCM not in range"
+	.ident(.concat(.string(label_),"_dpcm_len")) = (((*-(label_))-1)>>4)
 .endmacro
 
 .align 64
 scream: .incbin "khan.dmc"
-DPCM_ADDR scream
+DPCM_SAMPLE scream
 
 .align 64
 silent: .byte 0
-DPCM_ADDR silent
+DPCM_SAMPLE silent
 
+SCREAM_BYTES = $CE4 ; scream has this many bytes before silent zero padding at the end
+DPCM_BYTE_NTSC = 72*8 ; cycles per byte at rate $E
+DPCM_BYTE_PAL  = 66*8
+CLOCKS_NTSC = 1789772/60
+CLOCKS_PAL = 1662607/50
 
 .segment "RODATA"
+
+scream_frames: ; how many frames does a scream last before we should silence it
+.byte 4 + (SCREAM_BYTES * DPCM_BYTE_NTSC / CLOCKS_NTSC)
+.byte 4 + (SCREAM_BYTES * DPCM_BYTE_PAL  / CLOCKS_PAL )
 
 palette:
 .byte $0F, $0F, $0F, $0F
@@ -192,9 +209,18 @@ modt4:
 ; =========
 
 animate:
+	inc textspr
 	; animate mouth/eyes with a CHR page flip
-	inc mouth
-	inc mouth
+	lda mouth
+	beq @mouth_off
+		dec mouth
+		bne @mouth_end
+		jsr play_silent
+	@mouth_off:
+		;jsr play_silent
+		; TODO HACK
+		jsr do_scream
+	@mouth_end:
 	; animate parallax
 	ldx #0
 	stx j ; tile index
@@ -230,7 +256,65 @@ animate:
 		inx
 		cpx #COLUMNS
 		bcc @loop
+	; select CHR pages
+	lda mouth
+	cmp #1
+	lda #0
+	lsr
+	lsr
+	lsr
+	lsr
+	eor #%00010000
+	sta chrsel ; mouth>1 selects page 0 background, otherwise page 1
+	lda textspr
+	asl
+	and #%00001000
+	ora chrsel
+	sta chrsel ; textspr flips text page every 8 frames
 	rts
+
+do_scream:
+	ldx pal
+	lda scream_frames, X
+	sta mouth
+	jsr play_scream
+	rts
+
+.if USE_DPCM
+
+play_silent:
+	lda #%00000000 ; sample off
+	sta $4015
+	lda #$4E ; looped, rate $E
+	sta $4010
+	lda #silent_dpcm_addr
+	sta $4012
+	lda #silent_dpcm_len
+	sta $4013
+	lda #%00010000 ; sample on
+	sta $4015
+	rts
+
+play_scream:
+	lda #%00000000
+	sta $4015
+	lda #$4E
+	sta $4010
+	lda #scream_dpcm_addr
+	sta $4012
+	lda #scream_dpcm_len
+	sta $4013
+	lda #%00010000
+	sta $4015
+	rts
+
+.else
+
+play_silent:
+play_scream:
+	rts
+
+.endif
 
 .macro NMT_ROW1 nmt_, index_
 	lda nmt_+index_, Y
@@ -384,18 +468,13 @@ render:
 		jsr oam_dma ; NTSC should OAM DMA at end of forced blank
 	:
 	; set CHR page and other $2000 properties
-	lda mouth
-	lsr
-	ora mouth
-	lsr
-	lsr
-	lsr
-	and #%00011000 ; mouth high bit selects both CHR pages
-	ora #%10100000 ; NMI on, high sprites, +1 increment, nametable 00
+	lda chrsel
+	and #%00011000
+	ora #%10100000 ; NMI on, tall sprites, +1 increment, nametable 00
 	sta $2000
 	SCROLL_SPLIT 8,48,0
 	; unblank
-	lda #%00011010
+	lda #%00011110
 	sta $2001 ; line 47 hblank > dot 257
 	.assert ROWST=12, error, "render timing needs adjustment"
 	jsr render_wait1
@@ -412,15 +491,14 @@ render_wait0:
 @ntsc:
 	jsr delay_1536
 	jsr delay_192
-	jsr delay_48
-	jsr delay_48
-	jsr delay_12
+	jsr delay_96
+	jsr delay_24
 	rts
 @pal:
 	jsr delay_6144
 	jsr delay_384
 	jsr delay_96
-	jsr delay_12
+	jsr delay_24
 	rts
 
 render_wait1:
@@ -453,6 +531,7 @@ render_wait0:
 	jsr delay_192
 	jsr delay_96
 	jsr delay_48
+	jsr delay_12
 	nop
 	nop
 	nop
@@ -463,6 +542,7 @@ render_wait0:
 	jsr delay_6144
 	jsr delay_384
 	jsr delay_192
+	jsr delay_12
 	nop
 	rts
 
@@ -598,8 +678,6 @@ reset:
 		bit $2002
 		bpl :-
 	; preserve positions on reset
-	lda mouth
-	pha
 	ldx #0
 	:
 		lda rot1, X
@@ -636,8 +714,6 @@ reset:
 		sta rot1, X
 		cpx #0
 		bne @loop
-	pla
-	sta mouth
 	; clear stack, separately wipe OAM
 	lda #0
 	:
@@ -728,19 +804,6 @@ main:
 	; turn on NMI
 	lda #%10000000
 	sta $2000
-	; HACK test of DPCM
-	.if USE_DPCM
-		lda #$4E
-		sta $4010
-		;lda #scream_dpcm
-		lda #silent_dpcm
-		sta $4012
-		;lda #$FF
-		lda #0
-		sta $4013
-		lda #$10
-		sta $4015
-	.endif
 	; infinite loop
 :
 	jmp :-
