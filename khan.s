@@ -585,6 +585,8 @@ draw_text:
 	lda siny, X
 	sta j
 	; jitter
+	lda mouth
+	beq :+ ; no jitter if text is forced and not screaming
 	jsr prng2
 	and #3
 	bne :+ ; jitter 1/4 frames
