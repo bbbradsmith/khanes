@@ -20,15 +20,20 @@ SPEED_MAX = 3*256
 ; ===
 
 .segment "ZEROPAGE"
-i:       .res 1 ; temporary
-j:       .res 1
-pal:     .res 1 ; 0 = NTSC timing, 1 = PAL timing
-nmi_now: .res 1 ; prevents NMI reentry
-mouth:   .res 1 ; count down to sample stop / mouth close
-textax:  .res 2 ; text "angle" for curve
-textay:  .res 2
-textspr: .res 1 ; text sprite animation
-chrsel:  .res 1 ; selects CHR pages for rendering
+i:           .res 1 ; temporary
+j:           .res 1
+pal:         .res 1 ; 0 = NTSC timing, 1 = PAL timing
+nmi_now:     .res 1 ; prevents NMI reentry
+mouth:       .res 1 ; count down to sample stop / mouth close
+mouth_wait:  .res 2 ; count down to next auto scream
+textax:      .res 2 ; text "angle" for curve
+textay:      .res 2
+textspr:     .res 1 ; text sprite animation
+chrsel:      .res 1 ; selects CHR pages for rendering
+gamepad:     .res 1
+gamepad_new: .res 1
+gamepad_old: .res 1
+seed:        .res 3
 
 .segment "BSS"
 nmt:  .res (ROWST*32)
@@ -205,22 +210,51 @@ modt4:
 .endrepeat
 
 ; =========
-; Utilities
+; Animation
 ; =========
 
 animate:
+	jsr prng_init ; initialize seed if needed
+	; poll gamepad
+	lda gamepad
+	sta gamepad_old
+	jsr gamepad_poll
+	eor gamepad_old
+	and gamepad
+	sta gamepad_new
+	; CHR page animation for text
 	inc textspr
-	; animate mouth/eyes with a CHR page flip
+	; mouth timer for scream
 	lda mouth
 	beq @mouth_off
 		dec mouth
 		bne @mouth_end
-		jsr play_silent
+		jsr prng
+		sta mouth_wait+0
+		jsr prng
+		and #7 ; wait up to ~30 seconds between screams
+		sta mouth_wait+1
 	@mouth_off:
-		;jsr play_silent
-		; TODO HACK
-		jsr do_scream
+		jsr play_silent
 	@mouth_end:
+	; decide whether to scream
+	lda gamepad_new
+	and #(PAD_A | PAD_B)
+	bne @scream_on ; A or B pressed this frame
+	lda mouth
+	bne @scream_end ; already screaming
+	lda mouth_wait+0
+	ora mouth_wait+1
+	beq @scream_on ; wait timer finished
+	lda mouth_wait+0
+	bne :+
+		dec mouth_wait+1
+	:
+	dec mouth_wait+0
+	jmp @scream_end ; decrement wait timer and continue
+	@scream_on:
+		jsr do_scream
+	@scream_end:
 	; animate parallax
 	ldx #0
 	stx j ; tile index
@@ -260,10 +294,10 @@ animate:
 	lda mouth
 	cmp #1
 	lda #0
-	lsr
-	lsr
-	lsr
-	lsr
+	ror
+	ror
+	ror
+	ror
 	eor #%00010000
 	sta chrsel ; mouth>1 selects page 0 background, otherwise page 1
 	lda textspr
@@ -277,7 +311,11 @@ do_scream:
 	ldx pal
 	lda scream_frames, X
 	sta mouth
-	jsr play_scream
+	lda gamepad
+	and #PAD_B ; B suppresses scream
+	bne :+
+		jsr play_scream
+	:
 	rts
 
 .if USE_DPCM
@@ -593,6 +631,79 @@ delay_48:    jsr delay_24
 delay_24:    jsr delay_12
 delay_12:    rts
 
+; =========
+; Utilities
+; =========
+
+.segment "CODE"
+
+PAD_A      = $01
+PAD_B      = $02
+PAD_SELECT = $04
+PAD_START  = $08
+PAD_U      = $10
+PAD_D      = $20
+PAD_L      = $40
+PAD_R      = $80
+
+gamepad_poll_: ; standard single read
+	lda #1
+	sta $4016
+	lda #0
+	sta $4016
+	ldx #8
+	:
+		pha
+		lda $4016
+		and #%00000011
+		cmp #%00000001
+		pla
+		ror
+		dex
+		bne :-
+	sta gamepad
+	rts
+
+gamepad_poll: ; DPCM safe read-until-consistent
+	jsr gamepad_poll_
+	:
+		lda gamepad
+		pha
+		jsr gamepad_poll_
+		pla
+		cmp gamepad
+		bne :-
+	cmp #0 ; refresh flags
+	rts
+
+prng_init: ; initialize seed if it's currently at 0
+	lda seed+0
+	ora seed+1
+	ora seed+2
+	bne :+
+		lda #$80
+		sta seed+2
+	:
+	rts
+
+prng:
+	ldy #8
+	lda seed+0
+:
+	asl
+	rol seed+1
+	rol seed+2
+	bcc :+
+	eor #$1B
+:
+	dey
+	bne :--
+	sta seed+0
+	cmp #0
+	rts
+
+.segment "ALIGN"
+
 ; Detects NTSC vs PAL
 ; http://forums.nesdev.com/viewtopic.php?p=163258#p163258
 ; A = 0 NTSC
@@ -677,7 +788,7 @@ reset:
 	:
 		bit $2002
 		bpl :-
-	; preserve positions on reset
+	; preserve positions/random stuff on reset
 	ldx #0
 	:
 		lda rot1, X
@@ -685,6 +796,16 @@ reset:
 		inx
 		cpx #COLUMNS
 		bcc :-
+	lda seed+0
+	pha
+	lda seed+1
+	pha
+	lda seed+2
+	pha
+	lda textax+1
+	pha
+	lda textay+1
+	pha
 	; clear RAM
 	lda #0
 	tax
@@ -699,7 +820,17 @@ reset:
 		sta $0700, X
 		inx
 		bne :-
-	; restore positions from stack
+	; restore positions/random stuff from stack
+	pla
+	sta textay+1
+	pla
+	sta textax+1
+	pla
+	sta seed+2
+	pla
+	sta seed+1
+	pla
+	sta seed+0
 	ldx #COLUMNS
 	@loop:
 		pla
