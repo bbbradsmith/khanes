@@ -587,9 +587,9 @@ draw_text:
 	; jitter
 	lda mouth
 	beq :+ ; no jitter if text is forced and not screaming
-	jsr prng2
-	and #3
-	bne :+ ; jitter 1/4 frames
+	;jsr prng2
+	;and #3
+	;bne :+ ; jitter 1/4 frames? every frame seems fine
 		jsr prng2
 		and #3
 		clc
@@ -621,6 +621,11 @@ draw_text:
 		clc
 		adc #8
 		sta i
+		tya
+		and #2
+		beq :+
+			inc i ; gaps between letters
+		:
 		inx
 		inx
 		inx
@@ -628,7 +633,7 @@ draw_text:
 		iny
 		iny
 		cpy #(8*2)
-		bcc :-
+		bcc :--
 	rts
 @text_off:
 	lda #$FF
