@@ -251,6 +251,8 @@ modt4:
 ; Animation
 ; =========
 
+.segment "CODE"
+
 animate:
 	jsr prng_init ; initialize seed if needed
 	; poll gamepad
