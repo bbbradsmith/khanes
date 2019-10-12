@@ -86,7 +86,7 @@ DPCM_SAMPLE scream
 silent: .byte 0
 DPCM_SAMPLE silent
 
-SCREAM_BYTES = $CE4 ; scream has this many bytes before silent zero padding at the end
+SCREAM_BYTES = $C15 ; scream has this many bytes before silent zero padding at the end
 DPCM_BYTE_NTSC = 72*8 ; cycles per byte at rate $E
 DPCM_BYTE_PAL  = 66*8
 CLOCKS_NTSC = 1789772/60
