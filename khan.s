@@ -600,6 +600,12 @@ draw_text:
 		clc
 		adc j
 		sta j
+		jmp :++
+	:
+		; if no jitter, try to centre it
+		inc i
+		inc j
+		inc j
 	:
 	; build sprite
 	ldy #0
