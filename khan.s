@@ -15,7 +15,7 @@ ROWST = 12 ; tile rows to update
 SPEED_MIN = 256/4
 SPEED_MAX = 3*256
 TEXT_SPEEDX = 251
-TEXT_SPEEDY = 373
+TEXT_SPEEDY = 479
 
 ; ===
 ; RAM
@@ -31,6 +31,7 @@ mouth_wait:  .res 2 ; count down to next auto scream
 textax:      .res 2 ; text "angle" for curve
 textay:      .res 2
 textspr:     .res 1 ; text sprite animation
+textcol:     .res 1 ; text color
 chrsel:      .res 1 ; selects CHR pages for rendering
 gamepad:     .res 1
 gamepad_new: .res 1
@@ -246,6 +247,18 @@ animate:
 	lda textay+1
 	adc #>TEXT_SPEEDY
 	sta textay+1
+	lda textspr ; cycle colour every 4 frames
+	and #3
+	bne :++
+		lda textcol
+		clc
+		adc #1
+		cmp #$2D
+		bcc :+
+			lda #$21
+		:
+		sta textcol
+	:
 	; mouth timer for scream
 	lda mouth
 	beq @mouth_off
@@ -601,6 +614,14 @@ render:
 		jsr oam_dma ; PAL should OAM DMA at start of NMI blank
 	:
 	bit $2002
+	; animated text colour
+	lda #$3F
+	sta $2006
+	lda #$1F
+	sta $2006
+	lda textcol
+	sta $2007
+	; nametable update
 	lda #$20
 	sta $2006
 	lda #$00
@@ -636,13 +657,17 @@ render_wait0:
 	jsr delay_1536
 	jsr delay_192
 	jsr delay_96
-	jsr delay_24
+	nop
+	nop
+	nop
 	rts
 @pal:
 	jsr delay_6144
 	jsr delay_384
 	jsr delay_96
-	jsr delay_24
+	nop
+	nop
+	nop
 	rts
 
 render_wait1:
@@ -675,18 +700,19 @@ render_wait0:
 	jsr delay_192
 	jsr delay_96
 	jsr delay_48
-	jsr delay_12
-	nop
-	nop
-	nop
 	nop
 	nop
 	rts
 @pal:
 	jsr delay_6144
 	jsr delay_384
-	jsr delay_192
+	jsr delay_96
+	jsr delay_48
+	jsr delay_24
 	jsr delay_12
+	nop
+	nop
+	nop
 	nop
 	rts
 
@@ -1024,9 +1050,11 @@ main:
 		ldx #0
 		dey
 		bne :-
-	; setup initial time to scream
+	; setup initial stuff
 	jsr prng_init
 	jsr mouth_wait_reload
+	lda #$21
+	sta textcol
 	; fill render data for first frame
 	jsr animate
 	jsr nmt_rows
