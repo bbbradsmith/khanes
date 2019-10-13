@@ -1,19 +1,9 @@
-WORK IN PROGRESS! PLEASE RETURN LATER!
+# KHAN.NES
+
+A stack of kirks endlessly screaming the name of his greatest foe... in my NES? It's more likely than you think.
+
+Full explanation: https://www.patreon.com/posts/30714624
 
 
-An NES tribute to KHAN:
-
-https://www.khangames.com/
-
-On a dare from Gradual Games:
-
-http://www.gradualgames.com/
-
-Directly inspired by this GIF:
-
-https://giphy.com/gifs/other-stupid-sRQ5udxoCqk5G
-
-Which in turn was probably inspired by this pillar of YTMND:
-
-https://wiki.ytmnd.com/KHAN!
-
+Brad Smith, 2019
+http://rainwarrior.ca
